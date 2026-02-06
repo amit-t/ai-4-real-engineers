@@ -1,0 +1,349 @@
+import { useState, useRef, useEffect } from "react";
+import { useFetcher } from "react-router";
+import type { Route } from "./+types/admin.users";
+import { getAllUsers, updateUser, updateUserRole } from "~/services/userService";
+import { getCurrentUserId } from "~/lib/session";
+import { getUserById } from "~/services/userService";
+import { UserRole } from "~/db/schema";
+import { Card, CardContent, CardHeader } from "~/components/ui/card";
+import { Button } from "~/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "~/components/ui/select";
+import { Pencil, Shield, Users } from "lucide-react";
+import { data } from "react-router";
+
+export function meta() {
+  return [
+    { title: "Manage Users — Ralph" },
+    { name: "description", content: "Manage platform users" },
+  ];
+}
+
+export async function loader({ request }: Route.LoaderArgs) {
+  const currentUserId = await getCurrentUserId(request);
+
+  if (!currentUserId) {
+    throw data("Select a user from the DevUI panel to manage users.", {
+      status: 401,
+    });
+  }
+
+  const currentUser = getUserById(currentUserId);
+
+  if (!currentUser || currentUser.role !== UserRole.Admin) {
+    throw data("Only admins can access this page.", {
+      status: 403,
+    });
+  }
+
+  const users = getAllUsers();
+
+  return { users };
+}
+
+export async function action({ request }: Route.ActionArgs) {
+  const currentUserId = await getCurrentUserId(request);
+
+  if (!currentUserId) {
+    throw data("You must be logged in.", { status: 401 });
+  }
+
+  const currentUser = getUserById(currentUserId);
+  if (!currentUser || currentUser.role !== UserRole.Admin) {
+    throw data("Only admins can manage users.", { status: 403 });
+  }
+
+  const formData = await request.formData();
+  const intent = formData.get("intent") as string;
+
+  if (intent === "update-user") {
+    const userId = parseInt(formData.get("userId") as string, 10);
+    const name = (formData.get("name") as string)?.trim();
+    const email = (formData.get("email") as string)?.trim();
+    if (isNaN(userId)) {
+      return data({ error: "Invalid user ID." }, { status: 400 });
+    }
+    if (!name) {
+      return data({ error: "Name cannot be empty." }, { status: 400 });
+    }
+    if (!email) {
+      return data({ error: "Email cannot be empty." }, { status: 400 });
+    }
+    updateUser(userId, name, email);
+    return { success: true };
+  }
+
+  if (intent === "update-role") {
+    const userId = parseInt(formData.get("userId") as string, 10);
+    const role = formData.get("role") as UserRole;
+    if (isNaN(userId)) {
+      return data({ error: "Invalid user ID." }, { status: 400 });
+    }
+    if (
+      !role ||
+      ![UserRole.Student, UserRole.Instructor, UserRole.Admin].includes(role)
+    ) {
+      return data({ error: "Invalid role." }, { status: 400 });
+    }
+    updateUserRole(userId, role);
+    return { success: true };
+  }
+
+  throw data("Invalid action.", { status: 400 });
+}
+
+function roleBadge(role: string) {
+  switch (role) {
+    case UserRole.Admin:
+      return (
+        <span className="inline-flex items-center rounded-full bg-purple-100 px-2.5 py-0.5 text-xs font-medium text-purple-800 dark:bg-purple-900/30 dark:text-purple-400">
+          Admin
+        </span>
+      );
+    case UserRole.Instructor:
+      return (
+        <span className="inline-flex items-center rounded-full bg-blue-100 px-2.5 py-0.5 text-xs font-medium text-blue-800 dark:bg-blue-900/30 dark:text-blue-400">
+          Instructor
+        </span>
+      );
+    case UserRole.Student:
+      return (
+        <span className="inline-flex items-center rounded-full bg-green-100 px-2.5 py-0.5 text-xs font-medium text-green-800 dark:bg-green-900/30 dark:text-green-400">
+          Student
+        </span>
+      );
+    default:
+      return null;
+  }
+}
+
+function EditableUserRow({
+  user,
+}: {
+  user: {
+    id: number;
+    name: string;
+    email: string;
+    role: string;
+    createdAt: string;
+  };
+}) {
+  const [isEditing, setIsEditing] = useState(false);
+  const [editName, setEditName] = useState(user.name);
+  const [editEmail, setEditEmail] = useState(user.email);
+  const nameInputRef = useRef<HTMLInputElement>(null);
+  const updateFetcher = useFetcher();
+  const roleFetcher = useFetcher();
+
+  useEffect(() => {
+    if (isEditing && nameInputRef.current) {
+      nameInputRef.current.focus();
+    }
+  }, [isEditing]);
+
+  useEffect(() => {
+    setEditName(user.name);
+    setEditEmail(user.email);
+  }, [user.name, user.email]);
+
+  // Close edit mode on successful save
+  useEffect(() => {
+    if (updateFetcher.state === "idle" && updateFetcher.data?.success) {
+      setIsEditing(false);
+    }
+  }, [updateFetcher.state, updateFetcher.data]);
+
+  function handleSave() {
+    const trimmedName = editName.trim();
+    const trimmedEmail = editEmail.trim();
+    if (!trimmedName || !trimmedEmail) return;
+    if (trimmedName === user.name && trimmedEmail === user.email) {
+      setIsEditing(false);
+      return;
+    }
+    updateFetcher.submit(
+      {
+        intent: "update-user",
+        userId: String(user.id),
+        name: trimmedName,
+        email: trimmedEmail,
+      },
+      { method: "post" }
+    );
+  }
+
+  function handleCancel() {
+    setEditName(user.name);
+    setEditEmail(user.email);
+    setIsEditing(false);
+  }
+
+  function handleKeyDown(e: React.KeyboardEvent) {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      handleSave();
+    } else if (e.key === "Escape") {
+      handleCancel();
+    }
+  }
+
+  function handleRoleChange(newRole: string) {
+    roleFetcher.submit(
+      { intent: "update-role", userId: String(user.id), role: newRole },
+      { method: "post" }
+    );
+  }
+
+  const formattedDate = new Date(user.createdAt).toLocaleDateString("en-US", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  });
+
+  return (
+    <tr className="border-b border-border last:border-0">
+      <td className="px-4 py-3">
+        {isEditing ? (
+          <input
+            ref={nameInputRef}
+            type="text"
+            value={editName}
+            onChange={(e) => setEditName(e.target.value)}
+            onKeyDown={handleKeyDown}
+            className="w-full rounded-md border border-input bg-background px-2 py-1 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          />
+        ) : (
+          <span className="text-sm font-medium">{user.name}</span>
+        )}
+      </td>
+      <td className="px-4 py-3">
+        {isEditing ? (
+          <input
+            type="email"
+            value={editEmail}
+            onChange={(e) => setEditEmail(e.target.value)}
+            onKeyDown={handleKeyDown}
+            className="w-full rounded-md border border-input bg-background px-2 py-1 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          />
+        ) : (
+          <span className="text-sm text-muted-foreground">{user.email}</span>
+        )}
+      </td>
+      <td className="px-4 py-3">
+        <Select value={user.role} onValueChange={handleRoleChange}>
+          <SelectTrigger className="h-8 w-32 text-xs">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={UserRole.Student}>Student</SelectItem>
+            <SelectItem value={UserRole.Instructor}>Instructor</SelectItem>
+            <SelectItem value={UserRole.Admin}>Admin</SelectItem>
+          </SelectContent>
+        </Select>
+      </td>
+      <td className="px-4 py-3 text-sm text-muted-foreground">
+        {formattedDate}
+      </td>
+      <td className="px-4 py-3">
+        {isEditing ? (
+          <div className="flex items-center gap-1">
+            <Button
+              size="sm"
+              className="h-7 text-xs"
+              onClick={handleSave}
+              disabled={!editName.trim() || !editEmail.trim()}
+            >
+              Save
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 text-xs"
+              onClick={handleCancel}
+            >
+              Cancel
+            </Button>
+          </div>
+        ) : (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground"
+            onClick={() => setIsEditing(true)}
+          >
+            <Pencil className="size-3.5" />
+          </Button>
+        )}
+      </td>
+    </tr>
+  );
+}
+
+export default function AdminUsers({ loaderData }: Route.ComponentProps) {
+  const { users } = loaderData;
+
+  return (
+    <div className="p-6 lg:p-8">
+      <div className="mb-8">
+        <h1 className="text-3xl font-bold">Manage Users</h1>
+        <p className="mt-1 text-muted-foreground">
+          View and manage platform users, edit details, and change roles
+        </p>
+      </div>
+
+      <div className="mb-4 flex items-center gap-2 text-sm text-muted-foreground">
+        <Users className="size-4" />
+        <span>
+          {users.length} {users.length === 1 ? "user" : "users"} total
+        </span>
+      </div>
+
+      {users.length === 0 ? (
+        <Card>
+          <CardContent className="py-8 text-center">
+            <Users className="mx-auto mb-3 size-8 text-muted-foreground/50" />
+            <p className="text-muted-foreground">No users found.</p>
+          </CardContent>
+        </Card>
+      ) : (
+        <Card>
+          <CardContent className="p-0">
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-border bg-muted/50">
+                    <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                      Name
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                      Email
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                      Role
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                      Created
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                      Actions
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {users.map((user) => (
+                    <EditableUserRow key={user.id} user={user} />
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  );
+}
