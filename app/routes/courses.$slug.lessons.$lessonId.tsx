@@ -1,6 +1,5 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { Link, useFetcher, useNavigate } from "react-router";
-import hljs from "highlight.js/lib/common";
 import { toast } from "sonner";
 import type { Route } from "./+types/courses.$slug.lessons.$lessonId";
 import { getCourseBySlug, getCourseWithDetails } from "~/services/courseService";
@@ -38,6 +37,7 @@ import {
   RotateCcw,
 } from "lucide-react";
 import { cn, formatDuration } from "~/lib/utils";
+import { renderMarkdown } from "~/lib/markdown.server";
 import { YouTubePlayer } from "~/components/youtube-player";
 import { data, isRouteErrorResponse } from "react-router";
 
@@ -147,6 +147,11 @@ export async function loader({ params, request }: Route.LoaderArgs) {
     }
   }
 
+  // Render lesson content from Markdown to HTML server-side
+  const contentHtml = lesson.content
+    ? await renderMarkdown(lesson.content)
+    : null;
+
   // Build prev/next navigation
   const allLessons = flattenCourseLessons(courseWithDetails);
   const currentIndex = allLessons.findIndex((l) => l.id === lessonId);
@@ -220,6 +225,7 @@ export async function loader({ params, request }: Route.LoaderArgs) {
       title: mod.title,
     },
     lesson,
+    contentHtml,
     lessonStatus,
     enrolled,
     currentUserId,
@@ -294,6 +300,7 @@ export default function LessonViewer({ loaderData }: Route.ComponentProps) {
     curriculum,
     module: mod,
     lesson,
+    contentHtml,
     lessonStatus,
     enrolled,
     currentUserId,
@@ -307,18 +314,7 @@ export default function LessonViewer({ loaderData }: Route.ComponentProps) {
   } = loaderData;
   const fetcher = useFetcher({ key: `mark-complete-${lesson.id}` });
   const quizFetcher = useFetcher({ key: `quiz-${lesson.id}` });
-  const contentRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
-
-  useEffect(() => {
-    if (contentRef.current) {
-      contentRef.current
-        .querySelectorAll("pre code:not(.hljs)")
-        .forEach((el) => {
-          hljs.highlightElement(el as HTMLElement);
-        });
-    }
-  }, [lesson.id, lesson.content]);
 
   const isMarking =
     fetcher.state !== "idle" && fetcher.formData?.get("intent") === "mark-complete";
@@ -390,15 +386,14 @@ export default function LessonViewer({ loaderData }: Route.ComponentProps) {
         )}
 
         {/* Lesson Content */}
-        {lesson.content && (
+        {contentHtml && (
           <div
-            ref={contentRef}
             className="prose prose-neutral dark:prose-invert mb-8 max-w-none"
-            dangerouslySetInnerHTML={{ __html: lesson.content }}
+            dangerouslySetInnerHTML={{ __html: contentHtml }}
           />
         )}
 
-        {!lesson.content && !lesson.videoUrl && (
+        {!contentHtml && !lesson.videoUrl && (
           <Card className="mb-8">
             <CardContent className="py-12 text-center text-muted-foreground">
               No content has been added to this lesson yet.

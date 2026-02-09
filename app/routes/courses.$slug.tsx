@@ -1,7 +1,6 @@
-import { useEffect, useMemo } from "react";
+import { useEffect } from "react";
 import { Link, useFetcher } from "react-router";
 import { toast } from "sonner";
-import { marked } from "marked";
 import type { Route } from "./+types/courses.$slug";
 import { getCourseBySlug, getCourseWithDetails, getLessonCountForCourse } from "~/services/courseService";
 import { isUserEnrolled, enrollUser } from "~/services/enrollmentService";
@@ -16,6 +15,7 @@ import { CourseImage } from "~/components/course-image";
 import { UserAvatar } from "~/components/user-avatar";
 import { data, isRouteErrorResponse } from "react-router";
 import { formatDuration } from "~/lib/utils";
+import { renderMarkdown } from "~/lib/markdown.server";
 
 export function meta({ data: loaderData }: Route.MetaArgs) {
   const title = loaderData?.course?.title ?? "Course";
@@ -58,8 +58,14 @@ export async function loader({ params, request }: Route.LoaderArgs) {
     }
   }
 
+  // Render sales copy from Markdown to HTML server-side
+  const salesCopyHtml = courseWithDetails.salesCopy
+    ? await renderMarkdown(courseWithDetails.salesCopy)
+    : null;
+
   return {
     course: courseWithDetails,
+    salesCopyHtml,
     lessonCount,
     enrolled,
     progress,
@@ -144,14 +150,9 @@ export function HydrateFallback() {
 }
 
 export default function CourseDetail({ loaderData }: Route.ComponentProps) {
-  const { course, lessonCount, enrolled, progress, lessonProgressMap, currentUserId } = loaderData;
+  const { course, salesCopyHtml, lessonCount, enrolled, progress, lessonProgressMap, currentUserId } = loaderData;
   const fetcher = useFetcher();
   const isEnrolling = fetcher.state !== "idle";
-
-  const salesCopyHtml = useMemo(() => {
-    if (!course.salesCopy) return null;
-    return marked.parse(course.salesCopy) as string;
-  }, [course.salesCopy]);
 
   useEffect(() => {
     if (fetcher.state === "idle" && fetcher.data?.success) {
