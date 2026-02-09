@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import type { Route } from "./+types/courses.$slug";
 import { getCourseBySlug, getCourseWithDetails, getLessonCountForCourse } from "~/services/courseService";
 import { isUserEnrolled } from "~/services/enrollmentService";
-import { calculateProgress, getLessonProgressForCourse } from "~/services/progressService";
+import { calculateProgress, getLessonProgressForCourse, getNextIncompleteLesson } from "~/services/progressService";
 import { getCurrentUserId } from "~/lib/session";
 import { LessonProgressStatus } from "~/db/schema";
 import { Card, CardContent, CardHeader } from "~/components/ui/card";
@@ -46,6 +46,7 @@ export async function loader({ params, request }: Route.LoaderArgs) {
   let enrolled = false;
   let progress = 0;
   let lessonProgressMap: Record<number, string> = {};
+  let nextLessonId: number | null = null;
 
   if (currentUserId) {
     enrolled = isUserEnrolled(currentUserId, course.id);
@@ -57,6 +58,9 @@ export async function loader({ params, request }: Route.LoaderArgs) {
       for (const record of progressRecords) {
         lessonProgressMap[record.lessonId] = record.status;
       }
+
+      const nextLesson = getNextIncompleteLesson(currentUserId, course.id);
+      nextLessonId = nextLesson?.id ?? null;
     }
   }
 
@@ -78,6 +82,7 @@ export async function loader({ params, request }: Route.LoaderArgs) {
     enrolled,
     progress,
     lessonProgressMap,
+    nextLessonId,
     currentUserId,
     pppPrice,
     tierInfo,
@@ -138,7 +143,7 @@ export function HydrateFallback() {
 }
 
 export default function CourseDetail({ loaderData }: Route.ComponentProps) {
-  const { course, salesCopyHtml, lessonCount, enrolled, progress, lessonProgressMap, currentUserId, pppPrice, tierInfo } = loaderData;
+  const { course, salesCopyHtml, lessonCount, enrolled, progress, lessonProgressMap, nextLessonId, currentUserId, pppPrice, tierInfo } = loaderData;
   const isInstructor = currentUserId === course.instructorId;
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -307,18 +312,17 @@ export default function CourseDetail({ loaderData }: Route.ComponentProps) {
                       style={{ width: `${progress}%` }}
                     />
                   </div>
-                  {course.modules.length > 0 && (
-                    <Link
-                      to={`/courses/${course.slug}/lessons/${
-                        course.modules[0].lessons[0]?.id ?? ""
-                      }`}
-                    >
-                      <Button className="w-full">
-                        <PlayCircle className="mr-2 size-4" />
-                        {progress > 0 ? "Continue Learning" : "Start Course"}
-                      </Button>
-                    </Link>
-                  )}
+                  {course.modules.length > 0 && (() => {
+                    const targetLessonId = nextLessonId ?? course.modules[0].lessons[0]?.id;
+                    return targetLessonId ? (
+                      <Link to={`/courses/${course.slug}/lessons/${targetLessonId}`}>
+                        <Button className="w-full">
+                          <PlayCircle className="mr-2 size-4" />
+                          {progress > 0 ? "Continue Learning" : "Start Course"}
+                        </Button>
+                      </Link>
+                    ) : null;
+                  })()}
                 </>
               ) : (
                 enrollButton
