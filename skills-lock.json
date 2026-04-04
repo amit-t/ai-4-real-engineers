@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "skills": {
+    "precision-mode": {
+      "source": "amit-t/skills",
+      "sourceType": "github",
+      "computedHash": "9340e04e9c8a659333587e907a62aa871516030fba567bcce186099e16c1870a"
+    }
+  }
+}
